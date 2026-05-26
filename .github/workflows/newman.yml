@@ -1,0 +1,101 @@
+name: Newman Contract Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  newman:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Lint OpenAPI contracts
+        run: npm run lint:contracts
+
+      - name: Start Prism mock servers
+        run: |
+          echo "Starting IoT Ingestion mock (port 4010)..."
+          nohup npm run mock:iot > prism-iot.log 2>&1 &
+          IOT_PID=$!
+          echo "IoT mock PID: $IOT_PID"
+          
+          echo "Starting AI Vision mock (port 4011)..."
+          nohup npm run mock:vision > prism-vision.log 2>&1 &
+          VISION_PID=$!
+          echo "Vision mock PID: $VISION_PID"
+          
+          sleep 3
+          echo "Checking mock servers..."
+          netstat -tuln | grep -E "4010|4011" || echo "Waiting for ports to bind..."
+
+      - name: Wait for mock servers to be healthy
+        run: |
+          echo "Waiting for IoT mock health check..."
+          for i in {1..30}; do
+            if curl -s http://localhost:4010/health > /dev/null 2>&1; then
+              echo "✓ IoT mock ready"
+              break
+            fi
+            echo "Attempt $i: Waiting for IoT mock..."
+            sleep 1
+          done
+          
+          echo "Waiting for Vision mock health check..."
+          for i in {1..30}; do
+            if curl -s http://localhost:4011/health > /dev/null 2>&1; then
+              echo "✓ Vision mock ready"
+              break
+            fi
+            echo "Attempt $i: Waiting for Vision mock..."
+            sleep 1
+          done
+
+      - name: Verify test files exist
+        run: |
+          echo "Checking Postman collection..."
+          ls -la postman/collections/
+          echo "Checking environments..."
+          ls -la postman/environments/
+          echo "Checking contracts..."
+          ls -la contracts/
+
+      - name: Run Newman contract tests
+        run: |
+          echo "Running Newman tests on mock environment..."
+          npm run test:mock || (echo "Newman test failed. Checking processes..." && ps aux | grep -E "node|prism" && exit 1)
+
+      - name: Show Prism logs on failure
+        if: failure()
+        run: |
+          echo "=== IoT Mock Server Log ==="
+          cat prism-iot.log || echo "No IoT log found"
+          echo ""
+          echo "=== Vision Mock Server Log ==="
+          cat prism-vision.log || echo "No Vision log found"
+          echo ""
+          echo "=== Running Processes ==="
+          ps aux | grep -E "node|prism|newman" || echo "No processes found"
+          echo ""
+          echo "=== Network Connections ==="
+          netstat -tuln | grep -E "4010|4011" || echo "No connections on 4010/4011"
+
+      - name: Upload Newman reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-reports
+          path: reports/

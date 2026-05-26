@@ -1,0 +1,14 @@
+ID,Folder,Endpoint,Method,Scenario,Input file/body,Expected status,Expected response check,Type,Pass/Fail,Evidence
+TC01,Health,/health,GET,Service is alive,-,200,status=ok,functional,✓,Newman report
+TC02,Functional,/readings,POST,Create reading happy path,sensor-reading-valid.json,201,"reading_id, device_id, accepted=true",functional,✓,Newman report
+TC03,Functional,/readings/latest,GET,List latest readings with limit,device_id=ESP32-LAB-A01&limit=5,200,items array with readings,functional,✓,Newman report
+TC04,Auth,/readings/latest,GET,Valid token is accepted,Bearer {{authToken}},200,items array,auth,✓,Newman report
+TC05,Auth,/readings,POST,Missing token (local only),sensor-reading-valid.json,401/403,Problem Details,auth,✓,Newman report
+TC06,Auth,/readings,POST,Invalid token (local only),Bearer invalid-token,401/403,Problem Details,auth,✓,Newman report
+TC07,Negative,/readings,POST,Missing required field device_id,sensor-reading-invalid-missing-device.json,400,Problem Details with title,negative,✓,Newman report
+TC08,Negative,/readings,POST,Wrong metric enum,metric=temp_hot,400,Problem Details with detail,negative,✓,Newman report
+TC09,Boundary,/readings,POST,Temperature boundary max (80°C),value=80,201,accepted=true,boundary,✓,Newman report
+TC10,Boundary,/readings,POST,Temperature boundary exceed (81°C),value=81,400,Problem Details,boundary,✓,Newman report
+TC11,Boundary,/readings/latest,GET,Query limit above max,limit=101,400,Problem Details,boundary,✓,Newman report
+TC12,Consumer,/detect,POST,Consumer calls AI Vision mock,camera_id + image_url,200,detection_id & confidence,consumer-smoke,✓,Newman report
+TC13,NonFunctional,/readings,POST,Local service response time,sensor-reading-valid.json,201,responseTime < 1000ms,reliability,✓,Newman report

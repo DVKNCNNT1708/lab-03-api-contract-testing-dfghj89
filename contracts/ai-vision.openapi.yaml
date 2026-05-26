@@ -1,0 +1,434 @@
+openapi: 3.1.0
+info:
+  title: Camera Stream ↔ AI Vision Contract
+  version: 1.0.0
+  description: |
+    API contract định nghĩa giao tiếp giữa Camera Stream (A2) và AI Vision (A4).
+    Sử dụng async pattern (202 Accepted + Webhook) cho xử lý phân tích ảnh.
+    Hỗ trợ tracking object qua nhiều frame và bounding box spatial data.
+  contact:
+    name: Team A2 - Camera Stream
+    url: https://github.com/FIT4110-team-camera
+    email: camera-team@fit4110.local
+servers:
+  - url: http://localhost:4010
+    description: Prism mock server for Camera Stream API
+tags:
+  - name: health
+    description: Health checks
+  - name: detection
+    description: Image detection and analysis
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Health check
+      description: Verify service is ready
+      security: []
+      responses:
+        "200":
+          description: Service is operational
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                ok:
+                  value:
+                    status: ok
+                    service: camera-stream
+                    version: 1.0.0
+
+  /detect:
+    post:
+      tags: [detection]
+      operationId: analyzeFrame
+      summary: Submit frame for analysis
+      description: |
+        Async endpoint that accepts a camera frame and returns immediately with 202 Accepted.
+        Results are delivered via webhook callback (POST detectionCompleted).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeFrameRequest"
+            examples:
+              valid_request:
+                value:
+                  cameraId: "CAM-01"
+                  frameUrl: "https://campus.local/frame-20260526-080000.jpg"
+                  timestamp: "2026-05-26T08:00:00Z"
+                  requestId: "REQ-001"
+                  analysisType: "PERSON_DETECTION"
+      responses:
+        "202":
+          description: Request accepted for async processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisAccepted"
+              examples:
+                accepted:
+                  value:
+                    detectionId: "550e8400-e29b-41d4-a716-446655440000"
+                    status: "PROCESSING"
+        "400":
+          description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                missing_camera:
+                  value:
+                    status: 400
+                    title: Bad Request
+                    detail: "Field 'cameraId' is required"
+        "422":
+          description: Validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                invalid_enum:
+                  value:
+                    status: 422
+                    title: Unprocessable Entity
+                    detail: "analysisType must be one of: PERSON_DETECTION, VEHICLE_DETECTION, UNKNOWN"
+
+  /detections:
+    get:
+      tags: [detection]
+      operationId: listDetections
+      summary: List detections with pagination
+      description: Retrieve paginated detection results using cursor-based pagination
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+          description: Cursor for pagination (null for first page)
+          example: null
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Number of items per page
+          example: 20
+      responses:
+        "200":
+          description: List of detections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionPage"
+              examples:
+                success:
+                  value:
+                    items:
+                      - detectionId: "550e8400-e29b-41d4-a716-446655440000"
+                        detectionType: "PERSON"
+                        confidence: 0.98
+                        boundingBox:
+                          x: 150
+                          y: 100
+                          width: 200
+                          height: 300
+                        trackingId: "TRACK-001"
+                        status: "COMPLETED"
+                    nextCursor: "eyJpZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMSJ9"
+                    hasMore: true
+
+  /detections/recent:
+    get:
+      tags: [detection]
+      operationId: getRecentDetections
+      summary: Get recent detections
+      description: Retrieve the most recent detection results (last 10)
+      responses:
+        "200":
+          description: Recent detections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DetectionResult"
+              examples:
+                success:
+                  value:
+                    items:
+                      - detectionId: "550e8400-e29b-41d4-a716-446655440000"
+                        detectionType: "PERSON"
+                        confidence: 0.95
+                        boundingBox:
+                          x: 200
+                          y: 150
+                          width: 180
+                          height: 280
+                        trackingId: "TRACK-002"
+                        status: "COMPLETED"
+
+  /detections/{detectionId}:
+    get:
+      tags: [detection]
+      operationId: getDetectionById
+      summary: Get detection by ID
+      description: Retrieve details of a specific detection result
+      parameters:
+        - name: detectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Detection ID (UUID)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Detection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionResult"
+              examples:
+                success:
+                  value:
+                    detectionId: "550e8400-e29b-41d4-a716-446655440000"
+                    detectionType: "PERSON"
+                    confidence: 0.99
+                    boundingBox:
+                      x: 180
+                      y: 120
+                      width: 210
+                      height: 320
+                    trackingId: "TRACK-003"
+                    status: "COMPLETED"
+        "404":
+          description: Detection not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                not_found:
+                  value:
+                    status: 404
+                    title: Not Found
+                    detail: "Detection with ID 'invalid-uuid' not found"
+
+webhooks:
+  detectionCompleted:
+    post:
+      operationId: onDetectionCompleted
+      summary: Detection completed webhook
+      description: |
+        Async callback when detection analysis is completed.
+        Called after POST /detect returns 202 Accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                detectionId:
+                  type: string
+                  format: uuid
+                  description: ID from initial 202 response
+                status:
+                  type: string
+                  enum: [COMPLETED, FAILED]
+                  description: Analysis status
+                detectionType:
+                  type: string
+                  enum: [PERSON, VEHICLE, UNKNOWN]
+                  description: Type of detection
+                confidence:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                  description: Confidence score (0-1)
+                boundingBox:
+                  $ref: "#/components/schemas/BoundingBox"
+                trackingId:
+                  type: string
+                  description: Tracking ID for object across frames
+                errorMessage:
+                  type: string
+                  nullable: true
+                  description: Error detail if status is FAILED
+              required:
+                - detectionId
+                - status
+            examples:
+              success:
+                value:
+                  detectionId: "550e8400-e29b-41d4-a716-446655440000"
+                  status: "COMPLETED"
+                  detectionType: "PERSON"
+                  confidence: 0.98
+                  boundingBox:
+                    x: 150
+                    y: 100
+                    width: 200
+                    height: 300
+                  trackingId: "TRACK-001"
+              failed:
+                value:
+                  detectionId: "550e8400-e29b-41d4-a716-446655440001"
+                  status: "FAILED"
+                  errorMessage: "Unable to process image: corrupted data"
+      responses:
+        "200":
+          description: Webhook received successfully
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token authentication
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        service:
+          type: string
+        version:
+          type: string
+      required: [status, service, version]
+
+    AnalyzeFrameRequest:
+      type: object
+      properties:
+        cameraId:
+          type: string
+          pattern: '^[A-Z0-9-]{5,20}$'
+          description: Camera identifier (alphanumeric with hyphens)
+        frameUrl:
+          type: string
+          format: uri
+          description: URL to the camera frame image
+        timestamp:
+          type: string
+          format: date-time
+          description: Frame capture timestamp (ISO 8601)
+        requestId:
+          type: string
+          description: Client-provided request ID for tracing
+        analysisType:
+          type: string
+          enum: [PERSON_DETECTION, VEHICLE_DETECTION, UNKNOWN]
+          description: Type of analysis to perform
+      required: [cameraId, frameUrl, timestamp, requestId, analysisType]
+
+    AnalysisAccepted:
+      type: object
+      properties:
+        detectionId:
+          type: string
+          format: uuid
+          description: Unique detection ID for tracking
+        status:
+          type: string
+          enum: [PROCESSING]
+          description: Initial processing status
+      required: [detectionId, status]
+
+    DetectionResult:
+      type: object
+      properties:
+        detectionId:
+          type: string
+          format: uuid
+        detectionType:
+          type: string
+          enum: [PERSON, VEHICLE, UNKNOWN]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        boundingBox:
+          $ref: "#/components/schemas/BoundingBox"
+        trackingId:
+          type: string
+          description: Object tracking ID across frames
+        status:
+          type: string
+          enum: [PROCESSING, COMPLETED, FAILED]
+      required: [detectionId, detectionType, confidence, boundingBox, trackingId, status]
+
+    BoundingBox:
+      type: object
+      properties:
+        x:
+          type: integer
+          minimum: 0
+          description: Top-left x coordinate
+        "y":
+          type: integer
+          minimum: 0
+          description: Top-left y coordinate
+        width:
+          type: integer
+          minimum: 1
+          description: Box width in pixels
+        height:
+          type: integer
+          minimum: 1
+          description: Box height in pixels
+      required: [x, "y", width, height]
+
+    DetectionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectionResult"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor for next page (null if no more)
+        hasMore:
+          type: boolean
+          description: Whether more results exist
+      required: [items, nextCursor, hasMore]
+
+    Problem:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: HTTP status code
+        title:
+          type: string
+          description: Short error title
+        detail:
+          type: string
+          description: Detailed error message
+        instance:
+          type: string
+          nullable: true
+          description: Request path that caused error
+      required: [status, title, detail]
